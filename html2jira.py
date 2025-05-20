@@ -33,6 +33,7 @@ except:
 import optparse
 import re
 import sys
+import csv
 
 try:
     from textwrap import wrap
@@ -65,6 +66,7 @@ GOOGLE_LIST_INDENT = 36
 IGNORE_ANCHORS = False
 IGNORE_IMAGES = False
 IGNORE_EMPHASIS = False
+NOT_CSV_FILE = ''
 
 ### Entity Nonsense ###
 # For checking space-only lines on line 771
@@ -948,6 +950,9 @@ def main():
     p.add_option("-g", "--google-doc", action="store_true", dest="google_doc",
                  default=False,
                  help="convert an html-exported Google Document")
+    p.add_option("-c", "--csv-columns", dest="csv_columns", action="store",
+                 type="string", default=NOT_CSV_FILE,
+                 help="convert html in a csv file, name all the columns to be converted separated by commas")
     p.add_option("-d", "--dash-unordered-list", action="store_true",
                  dest="ul_style_dash", default=False,
                  help="use a dash rather than a star for unordered list items")
@@ -980,49 +985,90 @@ def main():
         if len(args) > 2:
             p.error('Too many arguments')
 
-        if file_.startswith('http://') or file_.startswith('https://'):
-            baseurl = file_
-            j = urllib.urlopen(baseurl)
-            data = j.read()
-            if encoding is None:
-                try:
-                    from feedparser import _getCharacterEncoding as enc
-                except ImportError:
-                    enc = lambda x, y: ('utf-8', 1)
-                encoding = enc(j.headers, data)[0]
-                if encoding == 'us-ascii':
-                    encoding = 'utf-8'
+        if options.csv_columns==NOT_CSV_FILE:
+            if file_.startswith('http://') or file_.startswith('https://'):
+                baseurl = file_
+                j = urllib.urlopen(baseurl)
+                data = j.read()
+                if encoding is None:
+                    try:
+                        from feedparser import _getCharacterEncoding as enc
+                    except ImportError:
+                        enc = lambda x, y: ('utf-8', 1)
+                    encoding = enc(j.headers, data)[0]
+                    if encoding == 'us-ascii':
+                        encoding = 'utf-8'
+            else:
+                data = open(file_, 'rb').read()
+                if encoding is None:
+                    try:
+                        from chardet import detect
+                    except ImportError:
+                        detect = lambda x: {'encoding': 'utf-8'}
+                    encoding = detect(data)['encoding']
         else:
-            data = open(file_, 'rb').read()
-            if encoding is None:
-                try:
-                    from chardet import detect
-                except ImportError:
-                    detect = lambda x: {'encoding': 'utf-8'}
-                encoding = detect(data)['encoding']
+            #CSV File
+            print(f"Reading CSV file")
+            # Read the CSV file
+            with open(file_, mode='r', newline='', encoding='utf-8-sig') as file:
+                reader = csv.DictReader(file)
+                data = [row for row in reader]
     else:
         data = sys.stdin.read()
 
-    data = data.decode(encoding)
-    h = HTML2Jira(baseurl=baseurl)
-    # handle options
-    if options.ul_style_dash:
-        h.ul_item_mark = '-'
-    if options.em_style_asterisk:
-        h.emphasis_mark = '*'
-        h.strong_mark = '__'
+    if options.csv_columns==NOT_CSV_FILE:
+        data = data.decode(encoding)
+        h = HTML2Jira(baseurl=baseurl)
+        # handle options
+        if options.ul_style_dash:
+            h.ul_item_mark = '-'
+        if options.em_style_asterisk:
+            h.emphasis_mark = '*'
+            h.strong_mark = '__'
 
-    h.body_width = options.body_width
-    h.list_indent = options.list_indent
-    h.ignore_emphasis = options.ignore_emphasis
-    h.ignore_links = options.ignore_links
-    h.ignore_images = options.ignore_images
-    h.google_doc = options.google_doc
-    h.hide_strikethrough = options.hide_strikethrough
-    h.escape_snob = options.escape_snob
+        h.body_width = options.body_width
+        h.list_indent = options.list_indent
+        h.ignore_emphasis = options.ignore_emphasis
+        h.ignore_links = options.ignore_links
+        h.ignore_images = options.ignore_images
+        h.google_doc = options.google_doc
+        h.hide_strikethrough = options.hide_strikethrough
+        h.escape_snob = options.escape_snob
 
-    wrapwrite(h.handle(data))
-
+        wrapwrite(h.handle(data))
+    else:
+        html_columns=options.csv_columns.split(',')
+        for html_column in html_columns:
+            print(f"Writing CSV file, will update {html_column}",)
+        for row in data:
+            for html_column in html_columns:
+                if html_column in row:
+                    h = HTML2Jira(baseurl=baseurl)
+                    # handle options
+                    if options.ul_style_dash:
+                        h.ul_item_mark = '-'
+                    if options.em_style_asterisk:
+                        h.emphasis_mark = '*'
+                        h.strong_mark = '__'
+                    h.body_width = options.body_width
+                    h.list_indent = options.list_indent
+                    h.ignore_emphasis = options.ignore_emphasis
+                    h.ignore_links = options.ignore_links
+                    h.ignore_images = options.ignore_images
+                    h.google_doc = options.google_doc
+                    h.hide_strikethrough = options.hide_strikethrough
+                    h.escape_snob = options.escape_snob
+                    row[html_column] = h.handle(row[html_column])
+        # Write the modified data to a new CSV file with "-wiki.csv" suffix
+        new_csv_file_path = file_.replace('.csv', '-wiki.csv')
+        with open(new_csv_file_path, mode='w', newline='', encoding='utf-8-sig') as file:
+            writer = csv.DictWriter(file, fieldnames=reader.fieldnames)
+            writer.writeheader()
+            writer.writerows(data)
 
 if __name__ == "__main__":
     main()
+
+# -c=Description -c=Description "C:\Users\DanielB\OneDrive - Vontier\Decks\Tools\Tools - DevOps\DevOps Export to JIRA Import\Requirements Export.csv"Requirements Export.csv"
+# -c Description "C:\Users\DanielB\OneDrive - Vontier\Decks\Tools\Tools - DevOps\DevOps Export to JIRA Import\Requirements Export.csv"
+# -c History,Description "C:\Users\DanielB\OneDrive - Vontier\Decks\Tools\Tools - DevOps\DevOps Export to JIRA Import\Tasks Export.csv"
